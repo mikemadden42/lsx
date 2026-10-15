@@ -9,6 +9,7 @@ repository = "https://github.com/mikemadden42/lsx"
 readme = "README.md"
 keywords = ["ls", "files", "extension", "cli"]
 categories = ["command-line-utilities", "filesystem"]
+publish = false
 
 [dependencies]
 
