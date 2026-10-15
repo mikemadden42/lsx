@@ -1,5 +1,7 @@
 # lsx
 
+[![CI](https://github.com/mikemadden42/lsx/actions/workflows/ci.yml/badge.svg)](https://github.com/mikemadden42/lsx/actions/workflows/ci.yml)
+
 List the regular files in one directory, grouped by extension.
 
 ```
