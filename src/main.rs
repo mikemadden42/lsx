@@ -41,10 +41,7 @@ fn eprint_bytes(parts: &[&[u8]]) {
 fn os_reason(e: &io::Error) -> String {
     let text = e.to_string();
     match e.raw_os_error() {
-        Some(code) => text
-            .strip_suffix(&format!(" (os error {code})"))
-            .unwrap_or(&text)
-            .to_string(),
+        Some(code) => text.strip_suffix(&format!(" (os error {code})")).unwrap_or(&text).to_string(),
         None => text,
     }
 }
@@ -55,10 +52,7 @@ fn parse_args() -> Result<Options, ExitCode> {
     let prog = args.next().unwrap_or_else(|| OsString::from("lsx"));
     let prog = prog.as_bytes();
 
-    let mut opts = Options {
-        path: OsString::from("."),
-        show_hidden: false,
-    };
+    let mut opts = Options { path: OsString::from("."), show_hidden: false };
     let mut path_set = false;
     let mut options_done = false;
 
@@ -113,13 +107,7 @@ fn scan(opts: &Options) -> Result<Groups, ()> {
     match fs::metadata(path) {
         Err(e) => {
             let reason = os_reason(&e);
-            eprint_bytes(&[
-                b"Error: cannot access path: ",
-                path_bytes,
-                b": ",
-                reason.as_bytes(),
-                b"\n",
-            ]);
+            eprint_bytes(&[b"Error: cannot access path: ", path_bytes, b": ", reason.as_bytes(), b"\n"]);
             return Err(());
         }
         Ok(meta) if !meta.is_dir() => {
@@ -131,26 +119,14 @@ fn scan(opts: &Options) -> Result<Groups, ()> {
 
     let entries = fs::read_dir(path).map_err(|e| {
         let reason = os_reason(&e);
-        eprint_bytes(&[
-            b"Error opening directory: ",
-            path_bytes,
-            b": ",
-            reason.as_bytes(),
-            b"\n",
-        ]);
+        eprint_bytes(&[b"Error opening directory: ", path_bytes, b": ", reason.as_bytes(), b"\n"]);
     })?;
 
     let mut groups = Groups::new();
     for entry in entries {
         let entry = entry.map_err(|e| {
             let reason = os_reason(&e);
-            eprint_bytes(&[
-                b"Error reading directory: ",
-                path_bytes,
-                b": ",
-                reason.as_bytes(),
-                b"\n",
-            ]);
+            eprint_bytes(&[b"Error reading directory: ", path_bytes, b": ", reason.as_bytes(), b"\n"]);
         })?;
 
         let name = entry.file_name();
@@ -166,10 +142,7 @@ fn scan(opts: &Options) -> Result<Groups, ()> {
             Ok(meta) if meta.is_file() => {}
             _ => continue,
         }
-        groups
-            .entry(extension(name).to_vec())
-            .or_default()
-            .push(name.to_vec());
+        groups.entry(extension(name).to_vec()).or_default().push(name.to_vec());
     }
 
     for names in groups.values_mut() {
@@ -242,12 +215,7 @@ mod tests {
             (b"A.JPG", b".JPG"),
         ];
         for (name, want) in cases {
-            assert_eq!(
-                extension(name),
-                *want,
-                "name {}",
-                String::from_utf8_lossy(name)
-            );
+            assert_eq!(extension(name), *want, "name {}", String::from_utf8_lossy(name));
         }
     }
 }
