@@ -283,6 +283,23 @@ if [ "$(id -u)" != 0 ]; then
     chmod 700 "$lockdir"
 fi
 
+# A failed stdout write must not report success (needs Linux's /dev/full).
+if [ -w /dev/full ]; then
+    for args in "$fixture" "-h"; do
+        "$LSX" $args >/dev/full 2>/dev/null
+        actual_exit=$?
+        tests_run=$((tests_run + 1))
+        if [ "$actual_exit" = 1 ]; then
+            printf 'PASS %s\n' "write failure ($args)"
+        else
+            tests_failed=$((tests_failed + 1))
+            printf 'FAIL %s: exit %s, expected 1\n' "write failure ($args)" "$actual_exit"
+        fi
+    done
+else
+    printf 'SKIP %s: no /dev/full\n' "write failure"
+fi
+
 echo
 printf '%s test(s) run, %s failed\n' "$tests_run" "$tests_failed"
 [ "$tests_failed" = 0 ]

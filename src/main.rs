@@ -75,8 +75,7 @@ fn parse_args() -> Result<Options, ExitCode> {
                     continue;
                 }
                 b"-h" | b"--help" => {
-                    let _ = io::stdout().lock().write_all(&usage(prog));
-                    return Err(ExitCode::SUCCESS);
+                    return Err(write_stdout(|out| out.write_all(&usage(prog))));
                 }
                 [b'-', ..] => {
                     eprint_bytes(&[b"Unknown option: ", bytes, b"\n", &usage(prog)]);
@@ -179,23 +178,38 @@ fn scan(opts: &Options) -> Result<Groups, ()> {
     Ok(groups)
 }
 
-fn render(groups: &Groups) -> Vec<u8> {
-    let mut out = Vec::new();
+/// Streams the listing per spec §7, so no second copy of it is held in memory.
+fn render(groups: &Groups, out: &mut impl Write) -> io::Result<()> {
     for (ext, names) in groups {
         if ext.is_empty() {
-            out.extend_from_slice(b"No Extension");
+            out.write_all(b"No Extension")?;
         } else {
-            out.extend_from_slice(&ext[1..]);
+            out.write_all(&ext[1..])?;
         }
-        out.extend_from_slice(b":\n");
+        out.write_all(b":\n")?;
         for name in names {
-            out.extend_from_slice(b"- ");
-            out.extend_from_slice(name);
-            out.push(b'\n');
+            out.write_all(b"- ")?;
+            out.write_all(name)?;
+            out.write_all(b"\n")?;
         }
-        out.push(b'\n');
+        out.write_all(b"\n")?;
     }
-    out
+    Ok(())
+}
+
+/// Runs `f` against a buffered stdout and flushes it. A write failure exits 1;
+/// a closed pipe (e.g. `lsx | head`) does so quietly, like a SIGPIPE'd C program.
+fn write_stdout(f: impl FnOnce(&mut io::BufWriter<io::StdoutLock>) -> io::Result<()>) -> ExitCode {
+    let mut out = io::BufWriter::new(io::stdout().lock());
+    match f(&mut out).and_then(|()| out.flush()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => ExitCode::FAILURE,
+        Err(e) => {
+            let reason = os_reason(&e);
+            eprint_bytes(&[b"Error writing output: ", reason.as_bytes(), b"\n"]);
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -206,8 +220,7 @@ fn main() -> ExitCode {
     let Ok(groups) = scan(&opts) else {
         return ExitCode::FAILURE;
     };
-    let _ = io::stdout().lock().write_all(&render(&groups));
-    ExitCode::SUCCESS
+    write_stdout(|out| render(&groups, out))
 }
 
 #[cfg(test)]
