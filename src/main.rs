@@ -85,13 +85,12 @@ fn parse_args() -> Result<Options, ExitCode> {
                 _ => {}
             }
         }
-        if !path_set {
-            opts.path = arg;
-            path_set = true;
-        } else {
+        if path_set {
             eprint_bytes(&[b"Unexpected argument: ", bytes, b"\n"]);
             return Err(ExitCode::from(2));
         }
+        opts.path = arg;
+        path_set = true;
     }
     Ok(opts)
 }
