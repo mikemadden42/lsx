@@ -5,7 +5,8 @@
 # Defaults to target/release/lsx relative to the repo root.
 #
 # Each test builds a controlled fixture directory, runs the binary, and
-# compares stdout and the exit code against expected values.
+# compares the exit code, stdout (byte for byte) and, on error paths, the
+# start of stderr against expected values.
 
 set -u
 
@@ -24,32 +25,22 @@ fi
 tests_run=0
 tests_failed=0
 
-# check NAME EXPECTED_EXIT EXPECTED_STDOUT_FILE -- ARGS...
-# Runs "$LSX ARGS..." and compares exit code + stdout.
-check() {
+# Each test runs "$LSX ARGS..." with stdout in $work/out and stderr in
+# $work/err, then applies expect_* assertions between begin and end.
+# Files are compared byte for byte: $(...) would strip trailing newlines and
+# hide a missing or extra blank line at the end of the listing.
+begin() {
     name=$1
-    expected_exit=$2
-    expected_out=$3
-    shift 4  # drop name, exit, out-file, and the literal "--"
-
-    actual_out=$("$LSX" "$@" 2>/dev/null)
-    actual_exit=$?
-
     tests_run=$((tests_run + 1))
     ok=1
+}
 
-    if [ "$actual_exit" != "$expected_exit" ]; then
-        ok=0
-        printf 'FAIL %s: exit %s, expected %s\n' "$name" "$actual_exit" "$expected_exit"
-    fi
+fail() {
+    ok=0
+    printf 'FAIL %s: %s\n' "$name" "$1"
+}
 
-    if [ "$actual_out" != "$(cat "$expected_out")" ]; then
-        ok=0
-        printf 'FAIL %s: stdout mismatch\n' "$name"
-        printf -- '--- expected ---\n%s\n--- actual ---\n%s\n' \
-            "$(cat "$expected_out")" "$actual_out"
-    fi
-
+end() {
     if [ "$ok" = 1 ]; then
         printf 'PASS %s\n' "$name"
     else
@@ -57,23 +48,65 @@ check() {
     fi
 }
 
-# check_exit NAME EXPECTED_EXIT -- ARGS...
-# Like check but only asserts the exit code (for help/error paths).
-check_exit() {
-    name=$1
-    expected_exit=$2
-    shift 3  # drop name, exit, and the literal "--"
+expect_exit() {
+    [ "$actual_exit" = "$1" ] || fail "exit $actual_exit, expected $1"
+}
 
-    "$LSX" "$@" >/dev/null 2>&1
-    actual_exit=$?
-
-    tests_run=$((tests_run + 1))
-    if [ "$actual_exit" = "$expected_exit" ]; then
-        printf 'PASS %s\n' "$name"
-    else
-        tests_failed=$((tests_failed + 1))
-        printf 'FAIL %s: exit %s, expected %s\n' "$name" "$actual_exit" "$expected_exit"
+expect_stdout() {
+    if ! cmp -s "$1" "$work/out"; then
+        fail "stdout mismatch (diff expected actual)"
+        diff "$1" "$work/out" | sed 's/^/    /'
     fi
+}
+
+expect_stderr_prefix() {
+    first=$(head -n 1 "$work/err")
+    case $first in
+        "$1"*) ;;
+        *) fail "stderr line 1 is \"$first\", expected prefix \"$1\"" ;;
+    esac
+}
+
+# check NAME EXPECTED_EXIT EXPECTED_STDOUT_FILE -- ARGS...
+# Asserts the exit code and exact stdout.
+check() {
+    begin "$1"
+    expected_exit=$2
+    expected_out=$3
+    shift 4  # drop name, exit, out-file, and the literal "--"
+    "$LSX" "$@" >"$work/out" 2>"$work/err"
+    actual_exit=$?
+    expect_exit "$expected_exit"
+    expect_stdout "$expected_out"
+    end
+}
+
+# check_err NAME EXPECTED_EXIT STDERR_PREFIX -- ARGS...
+# For error paths: asserts the exit code, empty stdout, and that the first
+# stderr line starts with STDERR_PREFIX.
+check_err() {
+    begin "$1"
+    expected_exit=$2
+    prefix=$3
+    shift 4  # drop name, exit, prefix, and the literal "--"
+    "$LSX" "$@" >"$work/out" 2>"$work/err"
+    actual_exit=$?
+    expect_exit "$expected_exit"
+    expect_stdout "$work/expected_empty"
+    expect_stderr_prefix "$prefix"
+    end
+}
+
+# check_write_failure NAME -- ARGS...
+# Runs with stdout on /dev/full; the failed write must exit 1 with an error.
+check_write_failure() {
+    begin "$1"
+    shift 2  # drop name and the literal "--"
+    "$LSX" "$@" >/dev/full 2>"$work/err"
+    actual_exit=$?
+    expect_exit 1
+    expect_stderr_prefix "Error writing output: "
+    end
 }
 
 work=$(mktemp -d)
@@ -125,6 +158,15 @@ EOF
 mkdir "$work/empty"
 : >"$work/expected_empty"
 
+# Help text is exact and names the program as invoked.
+cat >"$work/expected_help" <<EOF
+Usage: $LSX [-a|--all] [-h|--help] [--] [path]
+  -a, --all   Include hidden files (those starting with '.')
+  -h, --help  Show this help message
+  --          Treat the following argument as a path, even if it starts with '-'
+  path        Directory to inspect (default: current directory)
+EOF
+
 check "default grouping"   0 "$work/expected_default" -- "$fixture"
 check "include hidden -a"  0 "$work/expected_all"     -- -a "$fixture"
 check "include hidden --all" 0 "$work/expected_all"   -- --all "$fixture"
@@ -152,15 +194,21 @@ mkdir "$brokendir"
 ln -s "$work/nowhere" "$brokendir/dangling.txt"
 check "dangling symlink only"      0 "$work/expected_empty"   -- "$brokendir"
 
-check_exit "help -h"            0 -- -h
-check_exit "help --help"        0 -- --help
-check_exit "nonexistent path"   1 -- "$work/does-not-exist"
-check_exit "not a directory"    1 -- "$fixture/a.txt"
+check "help -h"                  0 "$work/expected_help"    -- -h
+check "help --help"              0 "$work/expected_help"    -- --help
+check_err "nonexistent path"     1 "Error: cannot access path: $work/does-not-exist: " -- "$work/does-not-exist"
+check_err "not a directory"      1 "Error: not a directory: $fixture/a.txt" -- "$fixture/a.txt"
 # Usage on the error path goes to stderr, so stdout stays empty.
-check "unknown option"           2 "$work/expected_empty"   -- --bogus
-check_exit "extra argument"     2 -- "$fixture" "$fixture"
-check_exit "dash path needs --" 2 -- -weird
-check_exit "extra arg after --" 2 -- -- "$fixture" "$fixture"
+check_err "unknown option"       2 "Unknown option: --bogus" -- --bogus
+# The usage block follows the error line, also on stderr ($work/err is from
+# the run above).
+begin "unknown option usage on stderr"
+{ printf 'Unknown option: --bogus\n'; cat "$work/expected_help"; } | cmp -s - "$work/err" ||
+    fail "stderr is not the error line followed by usage"
+end
+check_err "extra argument"       2 "Unexpected argument: $fixture" -- "$fixture" "$fixture"
+check_err "dash path needs --"   2 "Unknown option: -weird" -- -weird
+check_err "extra arg after --"   2 "Unexpected argument: $fixture" -- -- "$fixture" "$fixture"
 
 # --- Additional cases from the lsx porting spec (§12) ---
 
@@ -250,23 +298,13 @@ else
 fi
 
 # Argument parsing edge cases.
-check_exit "no bundling -ah"       2 -- -ah
-check_exit "help before bad opt"   0 -- -h --bogus
-check_exit "bad opt before help"   2 -- --bogus -h
-check_exit "bare dash"             2 -- -
-check_exit "-- then -a is a path"  1 -- -- -a
-check_exit "empty path"            1 -- ""
+check_err "no bundling -ah"       2 "Unknown option: -ah" -- -ah
+check "help before bad opt"       0 "$work/expected_help" -- -h --bogus
+check_err "bad opt before help"   2 "Unknown option: --bogus" -- --bogus -h
+check_err "bare dash"             2 "Unknown option: -" -- -
+check_err "-- then -a is a path"  1 "Error: cannot access path: -a: " -- -- -a
+check_err "empty path"            1 "Error: cannot access path: : " -- ""
 check "option after path"          0 "$work/expected_all"     -- "$fixture" -a
-
-# Help text is exact and names the program as invoked.
-cat >"$work/expected_help" <<EOF
-Usage: $LSX [-a|--all] [-h|--help] [--] [path]
-  -a, --all   Include hidden files (those starting with '.')
-  -h, --help  Show this help message
-  --          Treat the following argument as a path, even if it starts with '-'
-  path        Directory to inspect (default: current directory)
-EOF
-check "help text on stdout"        0 "$work/expected_help"    -- --help
 
 # A directory with only subdirs and dotfiles prints nothing.
 onlydirs="$work/onlydirs"
@@ -279,25 +317,42 @@ if [ "$(id -u)" != 0 ]; then
     lockdir="$work/locked"
     mkdir "$lockdir"
     chmod 000 "$lockdir"
-    check_exit "unreadable directory" 1 -- "$lockdir"
+    check_err "unreadable directory" 1 "Error opening directory: $lockdir: " -- "$lockdir"
     chmod 700 "$lockdir"
 fi
 
 # A failed stdout write must not report success (needs Linux's /dev/full).
 if [ -w /dev/full ]; then
-    for args in "$fixture" "-h"; do
-        "$LSX" $args >/dev/full 2>/dev/null
-        actual_exit=$?
-        tests_run=$((tests_run + 1))
-        if [ "$actual_exit" = 1 ]; then
-            printf 'PASS %s\n' "write failure ($args)"
-        else
-            tests_failed=$((tests_failed + 1))
-            printf 'FAIL %s: exit %s, expected 1\n' "write failure ($args)" "$actual_exit"
-        fi
-    done
+    check_write_failure "write failure (listing)" -- "$fixture"
+    check_write_failure "write failure (help)"    -- -h
 else
     printf 'SKIP %s: no /dev/full\n' "write failure"
+fi
+
+# A trailing slash on the path is accepted.
+check "trailing slash"             0 "$work/expected_default" -- "$fixture/"
+
+# FIFOs are not regular files, even with a file-like name.
+fifodir="$work/fifo"
+mkdir "$fifodir"
+touch "$fifodir/a.txt"
+mkfifo "$fifodir/pipe.txt"
+cat >"$work/expected_fifo" <<'EOF'
+txt:
+- a.txt
+
+EOF
+check "fifo not listed"            0 "$work/expected_fifo"    -- "$fifodir"
+
+# Readable but not searchable: every per-entry stat fails, which must be a
+# silent skip, not a read error (spec 9.1). Root can search it, so skip.
+if [ "$(id -u)" != 0 ]; then
+    nosearch="$work/nosearch"
+    mkdir "$nosearch"
+    touch "$nosearch/f.txt"
+    chmod 400 "$nosearch"
+    check "readable, not searchable"   0 "$work/expected_empty"   -- "$nosearch"
+    chmod 700 "$nosearch"
 fi
 
 echo
