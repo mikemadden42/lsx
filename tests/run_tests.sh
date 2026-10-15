@@ -241,9 +241,13 @@ check "bytewise case-sensitive order" 0 "$work/expected_case" -- "$casedir"
 # Non-UTF-8 names are printed as identical raw bytes.
 bytesdir="$work/bytes"
 mkdir "$bytesdir"
-touch "$bytesdir/$(printf 'caf\351.txt')" "$bytesdir/cafe.txt"
-printf 'txt:\n- cafe.txt\n- caf\351.txt\n\n' >"$work/expected_bytes"
-check "non-UTF-8 name"             0 "$work/expected_bytes"   -- "$bytesdir"
+# Some filesystems (e.g. APFS on macOS) reject such names; skip there.
+if touch "$bytesdir/$(printf 'caf\351.txt')" "$bytesdir/cafe.txt" 2>/dev/null; then
+    printf 'txt:\n- cafe.txt\n- caf\351.txt\n\n' >"$work/expected_bytes"
+    check "non-UTF-8 name"         0 "$work/expected_bytes"   -- "$bytesdir"
+else
+    printf 'SKIP %s: filesystem rejects non-UTF-8 names\n' "non-UTF-8 name"
+fi
 
 # Argument parsing edge cases.
 check_exit "no bundling -ah"       2 -- -ah
