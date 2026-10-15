@@ -9,7 +9,8 @@ lsx [-a|--all] [-h|--help] [--] [path]
 ```
 
 Rust port of [`refine`](https://github.com/mikemadden42/refine). File names
-are handled as raw bytes, so non-UTF-8 names print unchanged.
+are handled as raw bytes, so non-UTF-8 names print unchanged. The full
+behavior contract is in [docs/spec.md](docs/spec.md).
 
 ## Build and test
 
