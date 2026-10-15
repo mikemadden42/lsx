@@ -16,6 +16,6 @@ behavior contract is in [docs/spec.md](docs/spec.md).
 
 ```sh
 cargo build --release
-cargo test
-sh tests/run_tests.sh            # defaults to target/release/lsx
+cargo test                       # unit tests + tests/run_tests.sh
+./tests/run_tests.sh             # defaults to target/release/lsx
 ```

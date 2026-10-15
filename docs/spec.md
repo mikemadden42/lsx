@@ -348,7 +348,9 @@ short options, or `-x=y` syntax.
 ## 12. Conformance tests
 
 `tests/run_tests.sh <binary>` is a black-box suite of 36 cases. Point it at
-the port's binary (`sh tests/run_tests.sh ./lsx`) and it must pass them all.
+the port's binary (`sh tests/run_tests.sh ./lsx`) and it must pass them all. In this
+repository `cargo test` also runs it, against the freshly built binary
+(`tests/conformance.rs`).
 
 The first 16 cases come from `refine`'s suite. They keep their inputs, but
 the checks are stricter:

@@ -30,19 +30,18 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --locked --all-targets
 
-  # Unix only: lsx handles names as raw bytes via std::os::unix.
   test:
     name: test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
+        # Unix-only (std::os::unix, raw-byte names): no Windows.
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --locked --release
+      - run: cargo build --locked --all-targets
+      # Includes tests/run_tests.sh via tests/conformance.rs.
       - run: cargo test --locked
-      - name: conformance suite
-        run: sh tests/run_tests.sh target/release/lsx
