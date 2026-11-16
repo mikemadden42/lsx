@@ -2,8 +2,11 @@
 //!
 //! Names, paths and argv are handled as raw bytes throughout (see spec §8).
 
+#[cfg(not(unix))]
+compile_error!("lsx supports Unix only (it relies on std::os::unix for raw-byte names)");
+
 use std::collections::BTreeMap;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::ffi::OsStrExt;
@@ -13,6 +16,12 @@ use std::process::ExitCode;
 struct Options {
     path: OsString,
     show_hidden: bool,
+}
+
+/// What `parse_args` decided: list a directory, or exit now (help or a usage error).
+enum Action {
+    Run(Options),
+    Exit(ExitCode),
 }
 
 fn usage(prog: &[u8]) -> Vec<u8> {
@@ -46,8 +55,8 @@ fn os_reason(e: &io::Error) -> String {
     }
 }
 
-/// Parses argv per spec §2. On help or a usage error, returns the exit code to use.
-fn parse_args() -> Result<Options, ExitCode> {
+/// Parses argv per spec §2. Help and usage errors are reported here and yield `Action::Exit`.
+fn parse_args() -> Action {
     let mut args = std::env::args_os();
     let prog = args.next().unwrap_or_else(|| OsString::from("lsx"));
     let prog = prog.as_bytes();
@@ -69,23 +78,23 @@ fn parse_args() -> Result<Options, ExitCode> {
                     continue;
                 }
                 b"-h" | b"--help" => {
-                    return Err(write_stdout(|out| out.write_all(&usage(prog))));
+                    return Action::Exit(write_stdout(|out| out.write_all(&usage(prog))));
                 }
                 [b'-', ..] => {
                     eprint_bytes(&[b"Unknown option: ", bytes, b"\n", &usage(prog)]);
-                    return Err(ExitCode::from(2));
+                    return Action::Exit(ExitCode::from(2));
                 }
                 _ => {}
             }
         }
         if path_set {
             eprint_bytes(&[b"Unexpected argument: ", bytes, b"\n"]);
-            return Err(ExitCode::from(2));
+            return Action::Exit(ExitCode::from(2));
         }
         opts.path = arg;
         path_set = true;
     }
-    Ok(opts)
+    Action::Run(opts)
 }
 
 /// Extension key per spec §5: from the last '.' (inclusive) to the end, or
@@ -138,7 +147,7 @@ fn scan(opts: &Options) -> Result<Groups, ()> {
             continue;
         }
         // fs::metadata follows symlinks; DirEntry::metadata would not (spec §9.4).
-        match fs::metadata(path.join(OsStr::from_bytes(name))) {
+        match fs::metadata(entry.path()) {
             Ok(meta) if meta.is_file() => {}
             _ => continue,
         }
@@ -187,8 +196,8 @@ fn write_stdout(f: impl FnOnce(&mut io::BufWriter<io::StdoutLock>) -> io::Result
 
 fn main() -> ExitCode {
     let opts = match parse_args() {
-        Ok(opts) => opts,
-        Err(code) => return code,
+        Action::Run(opts) => opts,
+        Action::Exit(code) => return code,
     };
     let Ok(groups) = scan(&opts) else {
         return ExitCode::FAILURE;

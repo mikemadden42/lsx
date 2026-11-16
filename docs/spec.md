@@ -1,8 +1,9 @@
 # lsx — Porting Specification
 
-Version: 1.2 (2026-10-15). 1.1 was derived from `refine.c` at commit `2553c22`
+Version: 1.3 (2026-11-16). 1.1 was derived from `refine.c` at commit `2553c22`
 and verified against the built binary on 2026-10-14. 1.2 adds the
 write-failure exit status (§10) and describes the stricter test suite (§3, §12).
+1.3 adds tests for `lsx -- --`, a symlinked directory path and a closed pipe (§12).
 
 `lsx` is the new name for this tool. The C reference implementation is still
 called `refine` (repo `mikemadden42/refine`). Mentions of `refine` below refer
@@ -299,7 +300,7 @@ error. It now goes to **stderr** (exit 2). `-h`/`--help` still prints to
   directory handle (`fstatat`/`DirEntry::metadata` **with symlink following**,
   see below).
 - The original C++ ancestor (`declutter`/`dcl`) reported a missing path as
-  `Error: path does not exist:`. the `cannot access path: …: <reason>`
+  `Error: path does not exist:`. The `cannot access path: …: <reason>`
   wording is the one to keep.
 
 ### 9.4 Symlink-following pitfall in ports
@@ -347,7 +348,7 @@ short options, or `-x=y` syntax.
 
 ## 12. Conformance tests
 
-`tests/run_tests.sh <binary>` is a black-box suite of 36 cases. Point it at
+`tests/run_tests.sh <binary>` is a black-box suite of 39 cases. Point it at
 the port's binary (`sh tests/run_tests.sh ./lsx`) and it must pass them all. In this
 repository `cargo test` also runs it, against the freshly built binary
 (`tests/conformance.rs`).
@@ -381,11 +382,14 @@ The remaining cases cover the behaviors pinned down above:
 | `lsx -ah`                             | exit 2                                         |
 | `lsx -h --bogus`                      | exit 0                                         |
 | `lsx -- -a` (no dir `-a`)             | exit 1, `cannot access path: -a: …`            |
+| `lsx -- --` (no dir `--`)             | exit 1, `cannot access path: --: …`            |
 | `lsx ""`                              | exit 1                                         |
 | `lsx dir -a`                          | same output as `lsx -a dir`                    |
 | `chmod 000` dir                       | exit 1, `Error opening directory: …`           |
 | `chmod 400` dir with a file (§9.1)    | no output, exit 0                              |
 | empty dir / dirs-and-dotfiles only    | no output, exit 0                              |
 | path with a trailing slash (`dir/`)   | same output as `dir`                           |
+| path that is a symlink to a directory | same output as the directory                   |
+| `lsx dir \| head -n 1` (closed pipe)  | exit 1, stderr empty                           |
 | FIFO named `pipe.txt`                 | not listed                                     |
 | stdout on `/dev/full` (listing, `-h`) | exit 1, `Error writing output: …`              |
