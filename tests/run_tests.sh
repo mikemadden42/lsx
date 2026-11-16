@@ -110,7 +110,9 @@ check_write_failure() {
 }
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+# Restore permissions first: an interrupted run can leave a chmod 000/400
+# fixture behind that rm -rf alone cannot remove.
+trap 'chmod -R u+rwx "$work" 2>/dev/null; rm -rf "$work"' EXIT
 
 # Fixture: a mix of extensions, a no-extension file, a dotfile, a subdir.
 fixture="$work/fixture"
@@ -209,6 +211,7 @@ end
 check_err "extra argument"       2 "Unexpected argument: $fixture" -- "$fixture" "$fixture"
 check_err "dash path needs --"   2 "Unknown option: -weird" -- -weird
 check_err "extra arg after --"   2 "Unexpected argument: $fixture" -- -- "$fixture" "$fixture"
+check_err "-- then -- is a path" 1 "Error: cannot access path: --: " -- -- --
 
 # --- Additional cases from the lsx porting spec (§12) ---
 
@@ -328,6 +331,26 @@ if [ -w /dev/full ]; then
 else
     printf 'SKIP %s: no /dev/full\n' "write failure"
 fi
+
+# A path that is a symlink to a directory is followed (spec 3.1).
+ln -s "$fixture" "$work/fixture-link"
+check "symlinked directory path"   0 "$work/expected_default" -- "$work/fixture-link"
+
+# A reader that closes the pipe early (lsx | head) gets exit 1 and no
+# message. The listing (~1 MB) is far larger than any pipe buffer, so the
+# write is certain to hit EPIPE. POSIX sh has no PIPESTATUS, so the exit
+# code goes through a file.
+pipedir="$work/pipe"
+mkdir "$pipedir"
+pad=$(printf '%0200d' 0)
+awk -v dir="$pipedir" -v pad="$pad" 'BEGIN { for (i = 0; i < 4000; i++) printf "%s/%s%d.txt\n", dir, pad, i }' |
+    xargs touch
+begin "closed pipe"
+{ "$LSX" "$pipedir" 2>"$work/err"; echo $? >"$work/status"; } | head -n 1 >/dev/null
+actual_exit=$(cat "$work/status")
+expect_exit 1
+[ -s "$work/err" ] && fail "stderr not empty: $(head -n 1 "$work/err")"
+end
 
 # A trailing slash on the path is accepted.
 check "trailing slash"             0 "$work/expected_default" -- "$fixture/"
